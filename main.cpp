@@ -15,10 +15,28 @@ using namespace std;
 #define EPS 1e-9
 #define MASK 1000000
 #define WALL -10000000
-#define OP_NUM 100000
+#define OP_NUM 200000
 
 template<typename T> inline void Maxi(T &x, T y) {if(x < y) x = y; }
 template<typename T> inline void Mini(T &x, T y) {if(x > y) x = y; }
+
+template<typename T> T random(vector<T> v)
+{
+    int r = rand() % (int)v.size();
+    return v[r];
+}
+
+int random(multiset<int> s)
+{
+    int r = rand() % (int)s.size();
+    multiset<int>::iterator it = s.begin();
+    while(r)
+    {
+        it++;
+        r--;
+    }
+    return *it;
+}
 
 struct Point
 {
@@ -39,9 +57,9 @@ struct Cell
     int x, y, val, dis;
     bool operator < (Cell c)
     {
-    	if(dis <= 1 && c.dis > 1) return 1;
-    	if(dis > 1 && c.dis <= 1) return 0;
-    	return val < c.val;
+        if(dis <= 1 && c.dis > 1) return 1;
+        if(dis > 1 && c.dis <= 1) return 0;
+        return val < c.val;
     }
 };
 
@@ -83,6 +101,7 @@ public:
             for(int j = 1; j <= nCol; ++j) {
                 dist[i][j] = -1;
                 maxVal[i][j] = -INF;
+                dirRoot[i][j] = -1;
             }
         }
         queue<Point> Qu;
@@ -145,7 +164,7 @@ public:
 
     void init()
     {
-        FILE *f = fopen("MAP.inp", "r");
+        FILE *f = fopen("map.inp", "r");
         if(f == NULL) return;
         fscanf(f,"%d%d%d", &nRow, &nCol, &nMove);
         for(int i = 0; i < 2; ++i) {
@@ -154,7 +173,6 @@ public:
         fscanf(f, "%d%d", &bot[0].nTrash, (int*)&bot[0].isMask);
         for(int i = 1; i <= nRow; ++i) {
             for(int j = 1; j <= nCol; ++j) {
-                // TODO: read string
                 fread(f,board[i][j]);
             }
         }
@@ -201,6 +219,7 @@ public:
     multiset<int> getMove(int player)
     {
         multiset<int> move;
+        move.clear();
         if(nMove == 0 || bot[player].isCrash) return move;
 
         vector<Cell> St;
@@ -208,6 +227,8 @@ public:
         bot[player].update(board, nRow, nCol);
         for(int i = 1; i <= nRow; ++i) {
             for(int j = 1; j <= nCol; ++j) {
+                if(bot[player].dirRoot[i][j] == -1) continue;
+                if(bot[player].maxVal[i][j] < 0) continue;
                 int plr = distance(bot[player].curPos - (Point){i,j});
                 int opn = distance(bot[player^1].curPos - (Point){i,j});
                 if(opn == plr && bot[player].nTrash < bot[player^1].nTrash) continue;
@@ -218,19 +239,21 @@ public:
         sort(St.begin(),St.end());
         if(St[0].val == 0)
         {
-        	for(int i = 1; i <= nRow; ++i) {
-	            for(int j = 1; j <= nCol; ++j) {
-	                St.push_back({i,j,-bot[player].maxVal[i][j],0});
-	            }
-	        }
-	        sort(St.begin(),St.end());
+            St.clear();
+            for(int i = 1; i <= nRow; ++i) {
+                for(int j = 1; j <= nCol; ++j) {
+                    if(bot[player].dirRoot[i][j] == -1) continue;
+                    if(bot[player].maxVal[i][j] < 0) continue;
+                    St.push_back({i,j,-bot[player].maxVal[i][j],0});
+                }
+            }
+            sort(St.begin(),St.end());
         }
         for(int i = 0; i < min((int)St.size(),32); ++i) {
             int x = St[i].x;
             int y = St[i].y;
             move.insert(bot[player].dirRoot[x][y]);
         }
-        St.clear();
         return move;
     }
 
@@ -329,18 +352,6 @@ public:
     multiset<int> untriedMove[2];
 };
 
-int random(multiset<int> s)
-{
-    int r = rand() % (int)s.size();
-    multiset<int>::iterator it = s.begin();
-    while(r)
-    {
-        it++;
-        r--;
-    }
-    return *it;
-}
-
 double result[2];
 
 int* UCT(GameState rootState, int itermax)
@@ -407,39 +418,79 @@ void firstPlay(GameState *state)
     for(int x = 1; x <= state->nRow; ++x) {
         for(int y = 1; y <= state->nCol; ++y) {
             if(state->board[x][y] == MASK) {
-            	Mask.push_back((Point){x,y});
+                Mask.push_back((Point){x,y});
             }
         }
     }
-	GameState st = state->clone();
-	st.bot[0].curPos = Mask[0];
-	st.bot[1].curPos = Mask[1];
-	st.nMove -= 2;
-	UCT(st, OP_NUM / (st.nMove * st.nRow * st.nCol));
-	int pl;
-	if(result[0] > result[1]) pl = 0;
-	else pl = 1;
-	queue<Point> Qu;
-	Qu.push(Mask[pl]);
-	vst[Mask[pl].x][Mask[pl].y] = 1;
-	while(!Qu.empty())
-	{
-		Point pos = Qu.front();
-		Qu.pop();
-		for(int i = 0; i < 4; ++i)
-		{
-			Point next = pos + dir[i];
-			if(vst[next.x][next.y]) continue;
+    GameState st = state->clone();
+    st.bot[0].curPos = Mask[0];
+    st.bot[1].curPos = Mask[1];
+    st.nMove -= 2;
+    UCT(st, OP_NUM / (st.nMove * st.nRow * st.nCol / 10));
+    int pl;
+    if(result[0] > result[1]) pl = 0;
+    else pl = 1;
+    queue<Cell> Qu;
+    Qu.push({Mask[pl].x,Mask[pl].y,0,0});
+    vst[Mask[pl].x][Mask[pl].y] = 1;
+    vector<Cell> St;
+    while(!Qu.empty())
+    {
+        Point pos = (Point){Qu.front().x,Qu.front().y};
+        int val = Qu.front().val;
+        int dis = Qu.front().dis;
+        Qu.pop();
+        for(int i = 0; i < 4; ++i)
+        {
+            Point next = pos + dir[i];
+            if(next.x < 1 || next.x > state->nRow || next.y < 1 || next.y > state->nCol) continue;
+            if(vst[next.x][next.y]) continue;
             if(state->board[next.x][next.y] == WALL) continue;
-			if(state->board[next.x][next.y] == 0)
-			{
-				playMove(next);
-				return;	
-			}
-			Qu.push(next);
-			vst[next.x][next.y] = 1;
-		}
-	}	
+            int nextVal = val + state->board[next.x][next.y];
+            int nextDis = dis + 1;
+            Qu.push({next.x,next.y,nextVal,nextDis});
+            vst[next.x][next.y] = 1;
+            if(state->board[next.x][next.y] == 0)
+            {
+                St.push_back({next.x,next.y,nextVal,nextDis});
+            }
+        }
+    }
+    cerr<<"Check\n";
+    sort(St.begin(),St.end(),[](Cell a, Cell b){
+        return a.dis < b.dis || (a.dis == b.dis && a.val > b.val);
+    });
+    playMove((Point{St[0].x,St[0].y}));
+    // state->bot[0].curPos = (Point){St[0].x,St[0].y};
+
+    // Better score but worse time implement
+    vector<Point> Pt;
+    for(int x = 1; x <= state->nRow; ++x) {
+        for(int y = 1; y <= state->nCol; ++y) {
+            if(state->board[x][y] == 0) Pt.push_back({x,y});
+        }
+    }
+    Point pt = {0,0};
+    double maxUCB = result[pl];
+    for(int i = 0; i < (int)Pt.size(); ++i){
+        GameState st = state->clone();
+        st.bot[0].curPos = Pt[i];
+        vector<Point> V;
+        for(int j = 0; j < (int)Pt.size(); ++j)
+        {
+            if(j != i) V.push_back(Pt[j]);
+        }
+        st.bot[1].curPos = random(V);
+        st.nMove--;
+        UCT(st, max(1, OP_NUM / (st.nMove * st.nRow * st.nCol * (int)St.size())));
+        if(maxUCB < result[0])
+        {
+            pt = Pt[i];
+            maxUCB = result[0];
+        }
+    }
+    if(!(pt == (Point){0,0}) ) playMove(pt);
+    // state->bot[0].curPos = pt;
 }
 
 void UCTPlayGame()
@@ -448,13 +499,22 @@ void UCTPlayGame()
     GameState *state = new GameState();
     state->init();
 
-    if(state->bot[0].curPos == (Point){0,0}) firstPlay(state);
-    else
-    {
-        int* move = UCT(*state, OP_NUM / (state->nMove * state->nRow * state->nCol));
-        state->doMove(move);
-        playMove(state->bot[0].curPos);    
-    }
+    // while(state->nMove)
+    // {
+    //     double tBegin = clock();
+        if(state->bot[0].curPos == (Point){0,0}) firstPlay(state);
+        else
+        {
+            int* move = UCT(*state, OP_NUM / (state->nMove * state->nRow * state->nCol));
+            state->doMove(move);
+            playMove(state->bot[0].curPos);    
+        }
+    //     double tEnd = clock();
+    //     state->present();
+    //     cerr<<(tEnd - tBegin) / CLOCKS_PER_SEC<<'\n';
+    // }
+    // cerr<<"END GAME\n";
+
 }
 
 int main()
